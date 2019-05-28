@@ -12,7 +12,7 @@ from tf_idf_calculation import calculate as tf_idf_calculator
 conn_url = "mongodb://localhost"
 database = 'twitter'
 collection = 'apple_support'
-resultant_collections = ['tokenized_conversations_1', 'tokenized_conversations_2', 'tokenized_conversations_3', 'tokenized_conversations_4']
+resultant_collections = []
 __nlp__ = spacy.load('en_core_web_sm')
 
 def remove_special_chars(tokens):
@@ -109,17 +109,21 @@ def launch():
     tweets = tweets[0]
 
     del tweets['_id'] #Deleting unwanted data
+
+    print("Starting to excute clean slate protocol.")
+    tokenized_conversations = {}
+    number_of_partitions = 20    # Number of partitions for a huge data to divide into
+    number_of_tweets = len(tweets.keys())
     
+    # Collection for each partition
+    for i in range(number_of_partitions):
+        resultant_collections.append('tokenized_conversations_'+str(i+1))
+
     # Cleaning the collections before insertion
     print("Cleaning collections....")
     for collection_name in resultant_collections:
         db[collection_name].delete_many({})
-
-    print("Starting to excute clean slate protocol.")
-    tokenized_conversations = {}
-    number_of_partitions = 4    # Number of partitions for a huge data to divide into
-    number_of_tweets = len(tweets.keys())
-    
+        
     token_partitions = divide_tokens(number_of_tweets, number_of_partitions)    # Tuple with ranges for each partition
     
     tweets_partitions = {}
@@ -146,4 +150,4 @@ def launch():
     
     print("Clean slate protocol executed successfully.")
 
-launch()
+#launch()

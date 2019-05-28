@@ -17,17 +17,16 @@ def print_json(tf_idf_values, limit):
 
 
 class Nexus:
-    def __init__(self, conn_url, database):
+    def __init__(self, conn_url, database, number_of_childProcesses):
         print("Initialized nexus.")
         self.conn = MongoClient(conn_url)
         self.db = self.conn[database]
+        self.child_processes_count = number_of_childProcesses
+        self.local_database = {}
 
-        self.local_database = {
-            'local_tf_1': {},
-            'local_tf_2': {},
-            'local_tf_3': {},
-            'local_tf_4': {}
-        }
+        # Creating local collections to store data on runtime
+        for i in range(number_of_childProcesses):
+            self.local_database['local_tf_'+str(i+1)] = {}
     
     def run_extraction(self, tf_idf_collections):
         collection_data = tf_idf_collections
@@ -38,9 +37,13 @@ class Nexus:
     def shard_json(self, tf_idf_values):
         for key in tf_idf_values:
             # Selecting the collection number to store
-            collection_number = (ord(key[0]) % 4) + 1
+            if(isinstance(key, str)):
+                collection_number = (ord(key[0]) % self.child_processes_count) + 1
+            elif(isinstance(key, tuple) or isinstance(key, list)):
+                collection_number = (ord(key[0][0]) % self.child_processes_count) + 1
+
             self.local_database['local_tf_'+str(collection_number)].update({
-                key: tf_idf_values[key]
+                str(key): tf_idf_values[key]
             })
 
 
@@ -48,21 +51,31 @@ def launch_nexus():
     try:
         conn_url = "mongodb://localhost"
         database = 'twitter'
-        resultant_collections = ['tokenized_conversations_1', 'tokenized_conversations_2',
-                                'tokenized_conversations_3', 'tokenized_conversations_4']
-        tf_idf_collections = ['tf_idf_1', 'tf_idf_2', 'tf_idf_3', 'tf_idf_4']
+        resultant_collections = []
+        tf_idf_collections = []
+        number_of_child_processes = 20
 
-        print("Initializing nexus")
-        nexus = Nexus(conn_url, database)
+        print("Initializing nexus in training phase")
+        nexus = Nexus(conn_url, database, number_of_child_processes)
 
+        # Gathering the collection names which are storing the tokenized conversations
+        collection_names = nexus.db.list_collection_names()
+        for col in collection_names:
+            if 'tokenized_conversations' in col:
+                resultant_collections.append(col)
+        
         thread_pool = []
+
+        # Creating collections
+        for i in range(number_of_child_processes):
+            tf_idf_collections.append('tf_idf_'+str(i+1))
 
         # Cleaning tf_idf values collections
         for col in tf_idf_collections:
             nexus.db[col].delete_many({})
 
         # Pooling threads for each collection of tf_idf values
-        for i in range(len(tf_idf_collections)):
+        for i in range(number_of_child_processes):
             collection = nexus.db[resultant_collections[i]].find()
             collection = collection[0]
             del collection['_id']
@@ -77,7 +90,7 @@ def launch_nexus():
         for index in range(len(thread_pool)):
             thread_pool[index].join()
 
-            remote_collection = tf_idf_collections[index]
+            remote_collection = "tf_idf_"+str(index + 1)
             local_collection = nexus.local_database['local_tf_'+str(index+1)]
 
             print("Inserting into: "+remote_collection+".")
